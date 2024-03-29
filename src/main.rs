@@ -170,7 +170,7 @@ fn find_matching_branch_dirs(branch: &str, dirs: &Vec<DirEntry>) -> Vec<DirEntry
         .collect::<Vec<_>>()
 }
 
-fn get_workspace_with_branch(cfg: &Config, search: &str) {
+fn get_workspace_with_branch(cfg: &Config, search: &str) -> String {
     let captures = triple_value_regex().captures(search).unwrap();
 
     let first_capture = captures.get(1).unwrap().as_str();
@@ -190,32 +190,29 @@ fn get_workspace_with_branch(cfg: &Config, search: &str) {
     if owner_level_matches.len() == 0 {
         let repo_info = &RepoInfo::from_owner_name_branch(cfg, search);
         clone_repo(cfg, repo_info);
-        checkout_branch(cfg, repo_info, third_capture);
-        return;
+        return checkout_branch(cfg, repo_info, third_capture);
     }
 
-    let repo_level_matches = find_matching_repo_dirs(second_capture, &directories);
+    let repo_level_matches = find_matching_repo_dirs(second_capture, &owner_level_matches);
     if repo_level_matches.len() == 0 {
         let repo_info = &RepoInfo::from_owner_name_branch(cfg, search);
         clone_repo(cfg, repo_info);
-        checkout_branch(cfg, repo_info, third_capture);
-        return;
+        return checkout_branch(cfg, repo_info, third_capture);
     }
 
-    let branch_level_matches = find_matching_branch_dirs(third_capture, &directories);
+    let branch_level_matches = find_matching_branch_dirs(third_capture, &repo_level_matches);
     if branch_level_matches.len() == 0 {
         let repo_info = &RepoInfo::from_owner_name_branch(cfg, search);
-        checkout_branch(cfg, repo_info, third_capture);
-        return;
+        return checkout_branch(cfg, repo_info, third_capture);
     }
 
     let binding = branch_level_matches.into_iter().next().unwrap();
     let directory = binding.path().to_str().unwrap();
 
-    println!("{}", directory)
+    return directory.to_string();
 }
 
-fn get_workspace_or_branch(cfg: &Config, search: &str) {
+fn get_workspace_or_branch(cfg: &Config, search: &str) -> String {
     let captures = double_value_regex().captures(search).unwrap();
 
     let first_capture = captures.get(1).unwrap().as_str();
@@ -263,31 +260,25 @@ fn get_workspace_or_branch(cfg: &Config, search: &str) {
             exit(0);
         }
 
-        println!(
-            "{}",
-            branch_level_matches
-                .get(0)
-                .unwrap()
-                .path()
-                .to_str()
-                .unwrap()
-        );
-        return;
+        return branch_level_matches
+            .get(0)
+            .unwrap()
+            .path()
+            .to_str()
+            .unwrap()
+            .to_string();
     }
 
     // Check the directory and if it matches the first capture
     let repo_level_matches = find_matching_repo_dirs(second_capture, &directories);
     if repo_level_matches.len() == 0 {
-        eprintln!("Owner exists, repo does not.");
-        let path = clone_repo(cfg, &RepoInfo::from_owner_name(cfg, search));
-        println!("{}", path);
-        return;
+        return clone_repo(cfg, &RepoInfo::from_owner_name(cfg, search));
     }
 
     let binding = repo_level_matches.into_iter().next().unwrap();
     let directory = binding.path().to_str().unwrap();
 
-    println!("{}", directory);
+    return directory.to_string();
 }
 
 fn clone_repo(cfg: &Config, info: &RepoInfo) -> String {
@@ -322,7 +313,7 @@ fn clone_repo(cfg: &Config, info: &RepoInfo) -> String {
     branch_path.to_string()
 }
 
-fn checkout_branch(cfg: &Config, info: &RepoInfo, branch: &str) {
+fn checkout_branch(cfg: &Config, info: &RepoInfo, branch: &str) -> String {
     let repo_path = info.get_repo_path(cfg);
     if !Path::new(repo_path.as_path()).exists() {
         clone_repo(cfg, info);
@@ -330,9 +321,7 @@ fn checkout_branch(cfg: &Config, info: &RepoInfo, branch: &str) {
 
     let branch_path = repo_path.join(branch);
     if Path::new(branch_path.as_path()).exists() {
-        eprint!("alredy exists");
-        println!("{}", branch_path.as_path().to_str().unwrap());
-        return;
+        return branch_path.as_path().to_str().unwrap().to_string();
     };
 
     check_git_installed();
@@ -371,9 +360,16 @@ fn checkout_branch(cfg: &Config, info: &RepoInfo, branch: &str) {
         enable_direnv(branch_path.as_path().to_str().unwrap());
     }
 
-    // todo!("Find untracked files and copy to new worktree");
+    let untracked_files = git_get_untracked_files(main_branch_path.as_path()).unwrap();
 
-    println!("{}", branch_path.to_str().unwrap());
+    for file in untracked_files {
+        let from = main_branch_path.join(&file);
+        let to = branch_path.join(&file);
+        let _ = fs::create_dir(to.clone().parent().unwrap());
+        let _ = reflink_or_copy(from.clone(), to.clone());
+    }
+
+    return branch_path.to_str().unwrap().to_string();
 }
 
 fn check_git_installed() {
@@ -456,6 +452,23 @@ fn git_checkout_worktree(main_branch_path: &Path, branch: &str, new_branch: bool
     }
 }
 
+fn git_get_untracked_files(repo_path: &Path) -> Result<Vec<String>, &str> {
+    let arg = "git ls-files -o";
+    match Command::new("bash")
+        .current_dir(repo_path)
+        .arg("-c")
+        .arg(arg)
+        .output()
+    {
+        Ok(v) => Ok(String::from_utf8(v.stdout)
+            .unwrap()
+            .lines()
+            .map(|v| v.trim().to_string())
+            .collect::<Vec<_>>()),
+        Err(e) => panic!("Unable to get untracked files: {:?}", e),
+    }
+}
+
 fn get_default_branch_with_git(info: &RepoInfo) -> Result<String, &str> {
     let arg = format!(
         "git remote show {} | sed -n '/HEAD branch/s/.* //p'",
@@ -467,20 +480,6 @@ fn get_default_branch_with_git(info: &RepoInfo) -> Result<String, &str> {
             Ok(from_utf8.unwrap().trim().to_string())
         }
         Err(e) => panic!("Unable to get default branch of repository: {:?}", e),
-    }
-}
-
-// TODO: How does this handle private repo's? or orgs?..
-// might need to handle an auth token
-fn get_default_branch_from_github(repo: &str) -> Result<String, &str> {
-    let client = get_request_client();
-    let url = format!("https://api.github.com/repos/{repo}");
-    let response = client.get(url).send().expect("Unable to make request");
-    let api_response = response.json::<GithubGetRepoResponse>();
-
-    match api_response {
-        Ok(v) => Ok(v.default_branch),
-        Err(_) => Err("Unable to get default_branch"),
     }
 }
 
@@ -505,10 +504,13 @@ fn main() {
     let args = Args::parse();
 
     // TODO: Clean up the 'unwrap' everywhere
-    // TODO: move the print's here, so all functions will just return a str
     match &args.input {
-        s if double_value_regex().is_match(&s) => get_workspace_or_branch(&cfg, s),
-        s if triple_value_regex().is_match(&s) => get_workspace_with_branch(&cfg, s),
+        s if double_value_regex().is_match(&s) => {
+            println!("{}", get_workspace_or_branch(&cfg, s));
+        }
+        s if triple_value_regex().is_match(&s) => {
+            println!("{}", get_workspace_with_branch(&cfg, s));
+        }
         s if git_url_regex().is_match(&s) => {
             let path = clone_repo(&cfg, &RepoInfo::from_git_url(s));
             println!("{}", path)
