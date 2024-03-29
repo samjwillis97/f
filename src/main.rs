@@ -51,11 +51,6 @@ impl Default for Config {
     }
 }
 
-#[derive(Debug, Deserialize)]
-struct GithubGetRepoResponse {
-    default_branch: String,
-}
-
 #[derive(Debug)]
 struct RepoInfo {
     url: String,
@@ -116,10 +111,6 @@ impl RepoInfo {
             owner: captures.get(1).unwrap().as_str().to_string(),
             name: captures.get(2).unwrap().as_str().to_string(),
         }
-    }
-
-    fn get_owner_name(&self) -> String {
-        return format!("{}/{}", self.owner, self.name);
     }
 
     fn get_repo_path(&self, cfg: &Config) -> PathBuf {
@@ -225,8 +216,10 @@ fn get_all_directories(cfg: &Config) -> Vec<String> {
 
 fn list(cfg: &Config) -> String {
     let dirs = get_all_directories(cfg);
-    dirs.join(r#"
-"#)
+    dirs.join(
+        r#"
+"#,
+    )
 }
 
 fn get_workspace_or_branch(cfg: &Config, search: &str) -> String {
