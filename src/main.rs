@@ -212,6 +212,23 @@ fn get_workspace_with_branch(cfg: &Config, search: &str) -> String {
     return directory.to_string();
 }
 
+fn get_all_directories(cfg: &Config) -> Vec<String> {
+    WalkDir::new(&cfg.root_dir)
+        .max_depth(4)
+        .min_depth(3)
+        .into_iter()
+        .map(|v| v.unwrap())
+        .filter(|v| v.file_type().is_dir())
+        .map(|v| v.path().to_str().unwrap().to_string())
+        .collect::<Vec<String>>()
+}
+
+fn list(cfg: &Config) -> String {
+    let dirs = get_all_directories(cfg);
+    dirs.join(r#"
+"#)
+}
+
 fn get_workspace_or_branch(cfg: &Config, search: &str) -> String {
     let captures = double_value_regex().captures(search).unwrap();
 
@@ -321,6 +338,7 @@ fn checkout_branch(cfg: &Config, info: &RepoInfo, branch: &str) -> String {
 
     let branch_path = repo_path.join(branch);
     if Path::new(branch_path.as_path()).exists() {
+        eprint!("alredy exists");
         return branch_path.as_path().to_str().unwrap().to_string();
     };
 
@@ -505,6 +523,7 @@ fn main() {
 
     // TODO: Clean up the 'unwrap' everywhere
     match &args.input {
+        s if s == "list" => println!("{}", list(&cfg)),
         s if double_value_regex().is_match(&s) => {
             println!("{}", get_workspace_or_branch(&cfg, s));
         }

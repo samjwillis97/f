@@ -66,6 +66,19 @@
         my-crate = craneLib.buildPackage (commonArgs // {
           inherit cargoArtifacts;
         });
+
+        f = pkgs.writeShellScriptBin "f"
+        ''
+          case $1 in
+            list | -l)
+              ${my-crate}/bin/f list | ${pkgs.fzf}/bin/fzf
+            ;;
+            *)
+              ${my-crate}/bin/f "$@"
+            ;;
+          esac
+        '';
+
       in
       {
         checks = {
@@ -113,7 +126,7 @@
         };
 
         packages = {
-          default = my-crate;
+          default = f;
         } // lib.optionalAttrs (!pkgs.stdenv.isDarwin) {
           my-crate-llvm-coverage = craneLibLLvmTools.cargoLlvmCov (commonArgs // {
             inherit cargoArtifacts;
@@ -121,7 +134,7 @@
         };
 
         apps.default = flake-utils.lib.mkApp {
-          drv = my-crate;
+          drv = f;
         };
 
         devShells.default = craneLib.devShell {
@@ -130,9 +143,11 @@
 
           # Additional dev-shell environment variables can be set directly
           # MY_CUSTOM_DEVELOPMENT_VAR = "something else";
+          inputsFrom = [ my-crate ];
 
           # Extra inputs can be added here; cargo and rustc are provided by default.
           packages = [
+            f
             # pkgs.ripgrep
           ];
         };
