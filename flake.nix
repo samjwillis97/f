@@ -67,16 +67,47 @@
           inherit cargoArtifacts;
         });
 
-        f = pkgs.writeShellScriptBin "f"
+        f-fzf-wrapper = pkgs.writeShellScriptBin "f-fzf-wrapper"
         ''
-          case $1 in
-            list | -l)
-              ${my-crate}/bin/f list | ${pkgs.fzf}/bin/fzf
-            ;;
-            *)
-              ${my-crate}/bin/f "$@"
-            ;;
-          esac
+          selected=$(${my-crate}/bin/f list | ${pkgs.fzf}/bin/fzf -i --scheme=path --print-query)
+          retVal=$?
+
+          if [ $retVal -eq 1 ]; then
+            selected=$(${my-crate}/bin/f "$selected" 2>/dev/null)
+            retVal=$?
+          else
+            selected=$(echo $selected | grep -o '^.*')
+          fi
+
+          if [ $retVal -ne 0 ]; then
+            echo "Unable to get repo or branch: $selected"
+            exit 1
+          fi
+
+          repo_dir=$(dirname "$selected")
+          owner_dir=$(dirname "$repo_dir")
+          branch_name=$(basename "$selected")
+          repo_name=$(basename "$repo_dir")
+          owner_name=$(basename "$owner_dir")
+
+          selected_name="$owner_name/$repo_name/$branch_name"
+          tmux_running=$(pgrep tmux)
+
+          if [[ -z $TMUX ]] && [[ -z $tmux_running ]]; then
+              tmux new-session -s $selected_name -c $selected
+              exit 0
+          fi
+
+          if ! tmux has-session -t=$selected_name 2> /dev/null; then
+              tmux new-session -ds $selected_name -c $selected
+          fi
+
+          if [[ -z $TMUX ]]; then
+              tmux attach-session -t $selected_name
+              exit 0
+          fi
+
+          tmux switch-client -t $selected_name
         '';
 
       in
@@ -126,7 +157,7 @@
         };
 
         packages = {
-          default = f;
+          default = f-fzf-wrapper;
         } // lib.optionalAttrs (!pkgs.stdenv.isDarwin) {
           my-crate-llvm-coverage = craneLibLLvmTools.cargoLlvmCov (commonArgs // {
             inherit cargoArtifacts;
@@ -134,7 +165,7 @@
         };
 
         apps.default = flake-utils.lib.mkApp {
-          drv = f;
+          drv = f-fzf-wrapper;
         };
 
         devShells.default = craneLib.devShell {
@@ -147,7 +178,7 @@
 
           # Extra inputs can be added here; cargo and rustc are provided by default.
           packages = [
-            f
+            f-fzf-wrapper
             # pkgs.ripgrep
           ];
         };

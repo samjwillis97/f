@@ -12,7 +12,6 @@ use reqwest::{
     blocking::{Client, ClientBuilder},
     header::{HeaderMap, HeaderValue},
 };
-use serde::Deserialize;
 use walkdir::{DirEntry, WalkDir};
 
 #[derive(Parser, Debug)]
@@ -206,7 +205,7 @@ fn get_workspace_with_branch(cfg: &Config, search: &str) -> String {
 fn get_all_directories(cfg: &Config) -> Vec<String> {
     WalkDir::new(&cfg.root_dir)
         .max_depth(4)
-        .min_depth(3)
+        .min_depth(4)
         .into_iter()
         .map(|v| v.unwrap())
         .filter(|v| v.file_type().is_dir())
@@ -262,12 +261,11 @@ fn get_workspace_or_branch(cfg: &Config, search: &str) -> String {
                 .split("/")
                 .collect::<Vec<_>>();
             let owner_name = &repo_path_vec[repo_path_vec.len() - 2..].join("/");
-            checkout_branch(
+            return checkout_branch(
                 cfg,
                 &RepoInfo::from_owner_name(cfg, &owner_name),
                 second_capture,
             );
-            exit(0);
         }
 
         return branch_level_matches
@@ -363,7 +361,7 @@ fn checkout_branch(cfg: &Config, info: &RepoInfo, branch: &str) -> String {
     if main_node_modules.exists() {
         match reflink_or_copy(main_node_modules, branch_path.join("node_modules")) {
             Ok(_) => (),
-            Err(e) => println!("Unable to copy node_modules: {}", e),
+            Err(e) => eprintln!("Unable to copy node_modules: {}", e),
         }
     }
 
@@ -397,7 +395,7 @@ fn enable_direnv(path: &str) {
         .output()
     {
         Ok(_) => (),
-        Err(e) => println!("Unable to allow direnv: {}", e),
+        Err(e) => eprintln!("Unable to allow direnv: {}", e),
     };
 }
 
@@ -446,10 +444,10 @@ fn git_get_remote_branches_command(repo_path: &Path) -> Result<Vec<String>, &str
 
 fn git_checkout_worktree(main_branch_path: &Path, branch: &str, new_branch: bool) {
     let arg = if new_branch {
-        println!("Checking out new branch: {}", branch);
+        eprintln!("Checking out new branch: {}", branch);
         format!("git worktree add -b \"{}\" \"../{}\"", branch, branch)
     } else {
-        println!("Checking out remote branch: {}", branch);
+        eprintln!("Checking out remote branch: {}", branch);
         format!("git worktree add \"../{}\" \"{}\"", branch, branch)
     };
     match Command::new("bash")
@@ -459,7 +457,7 @@ fn git_checkout_worktree(main_branch_path: &Path, branch: &str, new_branch: bool
         .output()
     {
         Ok(_) => (),
-        Err(e) => println!("Unable to checkout branch: {}", e),
+        Err(e) => eprintln!("Unable to checkout branch: {}", e),
     }
 }
 
@@ -515,17 +513,20 @@ fn main() {
     let args = Args::parse();
 
     // TODO: Clean up the 'unwrap' everywhere
+    // TODO: Handle single value, clone repo from default user
     match &args.input {
         s if s == "list" => println!("{}", list(&cfg)),
         s if double_value_regex().is_match(&s) => {
             println!("{}", get_workspace_or_branch(&cfg, s));
+            return;
         }
         s if triple_value_regex().is_match(&s) => {
             println!("{}", get_workspace_with_branch(&cfg, s));
+            return;
         }
         s if git_url_regex().is_match(&s) => {
-            let path = clone_repo(&cfg, &RepoInfo::from_git_url(s));
-            println!("{}", path)
+            println!("{}", clone_repo(&cfg, &RepoInfo::from_git_url(s)));
+            return;
         }
         s if url_regex().is_match(&s) => todo!("URL value"),
         _ => todo!("Search"),
