@@ -67,7 +67,7 @@
           inherit cargoArtifacts;
         });
 
-        f-fzf-wrapper = pkgs.writeShellScriptBin "f-fzf-wrapper"
+        f-fzf-tmux-wrapper = pkgs.writeShellScriptBin "f-fzf-tmux-wrapper"
         ''
           selected=$(${my-crate}/bin/f list | ${pkgs.fzf}/bin/fzf -i --scheme=path --print-query)
           retVal=$?
@@ -157,7 +157,8 @@
         };
 
         packages = {
-          default = f-fzf-wrapper;
+          default = f-fzf-tmux-wrapper;
+          f-tmux = f-fzf-tmux-wrapper;
         } // lib.optionalAttrs (!pkgs.stdenv.isDarwin) {
           my-crate-llvm-coverage = craneLibLLvmTools.cargoLlvmCov (commonArgs // {
             inherit cargoArtifacts;
@@ -165,7 +166,11 @@
         };
 
         apps.default = flake-utils.lib.mkApp {
-          drv = f-fzf-wrapper;
+          drv = f-fzf-tmux-wrapper;
+        };
+
+        apps.f-tmux = flake-utils.lib.mkApp {
+          drv = f-fzf-tmux-wrapper;
         };
 
         devShells.default = craneLib.devShell {
@@ -178,7 +183,7 @@
 
           # Extra inputs can be added here; cargo and rustc are provided by default.
           packages = [
-            f-fzf-wrapper
+            f-fzf-tmux-wrapper
             # pkgs.ripgrep
           ];
         };
