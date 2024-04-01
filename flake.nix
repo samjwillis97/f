@@ -157,7 +157,7 @@
         };
 
         packages = {
-          default = f-fzf-tmux-wrapper;
+          default = my-crate;
           f-tmux = f-fzf-tmux-wrapper;
         } // lib.optionalAttrs (!pkgs.stdenv.isDarwin) {
           my-crate-llvm-coverage = craneLibLLvmTools.cargoLlvmCov (commonArgs // {
@@ -166,7 +166,7 @@
         };
 
         apps.default = flake-utils.lib.mkApp {
-          drv = f-fzf-tmux-wrapper;
+          drv = my-crate;
         };
 
         apps.f-tmux = flake-utils.lib.mkApp {
@@ -183,6 +183,7 @@
 
           # Extra inputs can be added here; cargo and rustc are provided by default.
           packages = [
+            my-crate
             f-fzf-tmux-wrapper
             # pkgs.ripgrep
           ];
