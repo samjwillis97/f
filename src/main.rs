@@ -369,7 +369,10 @@ fn checkout_branch(cfg: &Config, info: &RepoInfo, branch: &str) -> String {
         enable_direnv(branch_path.as_path().to_str().unwrap());
     }
 
-    let untracked_files = git_get_untracked_files(main_branch_path.as_path()).unwrap();
+    let mut untracked_files = git_get_untracked_files(main_branch_path.as_path()).unwrap();
+    let silently_added_files = git_get_silently_added_files(main_branch_path.as_path()).unwrap();
+
+    untracked_files.extend(silently_added_files);
 
     for file in untracked_files {
         let from = main_branch_path.join(&file);
@@ -475,6 +478,24 @@ fn git_get_untracked_files(repo_path: &Path) -> Result<Vec<String>, &str> {
             .map(|v| v.trim().to_string())
             .collect::<Vec<_>>()),
         Err(e) => panic!("Unable to get untracked files: {:?}", e),
+    }
+}
+
+fn git_get_silently_added_files(repo_path: &Path) -> Result<Vec<String>, &str> {
+    let arg = "git ls-files -v | grep '^h'";
+    match Command::new("bash")
+        .current_dir(repo_path)
+        .arg("-c")
+        .arg(arg)
+        .output()
+    {
+        Ok(v) => Ok(String::from_utf8(v.stdout)
+            .unwrap()
+            .lines()
+            .map(|v| v.trim().to_string())
+            .map(|v| v.split_at(2).1.to_string())
+            .collect::<Vec<_>>()),
+        Err(e) => panic!("Unable to get silently added files: {:?}", e),
     }
 }
 
