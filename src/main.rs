@@ -247,7 +247,7 @@ fn get_workspace_or_branch(cfg: &Config, search: &str) -> String {
                 exit(1);
             }
 
-            clone_repo(cfg, &RepoInfo::from_owner_name(cfg, search));
+            return clone_repo(cfg, &RepoInfo::from_owner_name(cfg, search));
         }
 
         let branch_level_matches = find_matching_branch_dirs(second_capture, &directories);
