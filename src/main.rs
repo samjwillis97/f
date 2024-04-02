@@ -369,16 +369,23 @@ fn checkout_branch(cfg: &Config, info: &RepoInfo, branch: &str) -> String {
         enable_direnv(branch_path.as_path().to_str().unwrap());
     }
 
-    let mut untracked_files = git_get_untracked_files(main_branch_path.as_path()).unwrap();
-    let silently_added_files = git_get_silently_added_files(main_branch_path.as_path()).unwrap();
-
-    untracked_files.extend(silently_added_files);
+    let untracked_files = git_get_untracked_files(main_branch_path.as_path()).unwrap();
 
     for file in untracked_files {
         let from = main_branch_path.join(&file);
         let to = branch_path.join(&file);
         let _ = fs::create_dir(to.clone().parent().unwrap());
         let _ = reflink_or_copy(from.clone(), to.clone());
+    }
+
+    let silently_added_files = git_get_silently_added_files(main_branch_path.as_path()).unwrap();
+
+    for file in silently_added_files {
+        let from = main_branch_path.join(&file);
+        let to = branch_path.join(&file);
+        let _ = fs::create_dir(to.clone().parent().unwrap());
+        let _ = reflink_or_copy(from.clone(), to.clone());
+        let _ = git_silent_add_file(branch_path.as_path(), &to);
     }
 
     return branch_path.to_str().unwrap().to_string();
@@ -496,6 +503,23 @@ fn git_get_silently_added_files(repo_path: &Path) -> Result<Vec<String>, &str> {
             .map(|v| v.split_at(2).1.to_string())
             .collect::<Vec<_>>()),
         Err(e) => panic!("Unable to get silently added files: {:?}", e),
+    }
+}
+
+fn git_silent_add_file(repo_path: &Path, file: &Path) {
+    let arg = format!(
+        "git add --intent-to-add {} && git update-index --skip-worktree --assume-unchanged {}",
+        file.to_str().unwrap(),
+        file.to_str().unwrap(),
+    );
+    match Command::new("bash")
+        .current_dir(repo_path)
+        .arg("-c")
+        .arg(arg)
+        .output()
+    {
+        Ok(_) => (),
+        Err(e) => eprintln!("Unable to add file: {}", e),
     }
 }
 
