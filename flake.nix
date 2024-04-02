@@ -69,14 +69,14 @@
 
         f-fzf-tmux-wrapper = pkgs.writeShellScriptBin "f-fzf-tmux-wrapper"
         ''
-          selected=$(${my-crate}/bin/f list | ${pkgs.fzf}/bin/fzf -i --scheme=path --print-query)
+          selected="$(${my-crate}/bin/f list | ${pkgs.fzf}/bin/fzf -i --scheme=path --print-query)"
           retVal=$?
 
           if [ $retVal -eq 1 ]; then
             selected=$(${my-crate}/bin/f "$selected" 2>/dev/null)
             retVal=$?
           else
-            selected=$(echo $selected | grep -o '^.*')
+            selected=$(echo "$selected" | sed -n 2p)
           fi
 
           if [ $retVal -ne 0 ]; then
