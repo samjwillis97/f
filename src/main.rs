@@ -391,6 +391,8 @@ fn checkout_branch(cfg: &Config, info: &RepoInfo, branch: &str) -> String {
     return branch_path.to_str().unwrap().to_string();
 }
 
+fn delete_branch() {}
+
 fn check_git_installed() {
     Command::new("git")
         .arg("-v")
@@ -523,12 +525,61 @@ fn git_silent_add_file(repo_path: &Path, file: &Path) {
     }
 }
 
+fn git_remove_worktree_branch(branch_path: &Path) {
+    let branch_name = branch_path.file_name().unwrap().to_str().unwrap();
+    let default_branch = get_default_branch_from_branch(branch_path).unwrap();
+    let repo_root = branch_path.parent().unwrap();
+    let default_branch_path = repo_root.join(default_branch);
+
+    println!("rm -rf {}", branch_path.to_str().unwrap());
+    println!("Working Dir: {:?}", default_branch_path);
+    println!("git worktree prune && git branch -D \"{}\"", branch_name);
+
+    // match Command::new("bash")
+    //     .arg("-c")
+    //     .arg(format!("rm -rf {}", branch_path.to_str().unwrap()))
+    //     .output()
+    // {
+    //     Ok(_) => (),
+    //     Err(e) => eprintln!("Unable to remove worktree branch directory: {}", e),
+    // }
+
+    // match Command::new("bash")
+    //     .current_dir(default_branch_path)
+    //     .arg("-c")
+    //     .arg(format!(
+    //         "git worktree prune && git branch -D \"{}\"",
+    //         branch_name
+    //     ))
+    //     .output()
+    // {
+    //     Ok(_) => (),
+    //     Err(e) => eprintln!("Unable to clean worktree and delete branch: {}", e),
+    // }
+}
+
 fn get_default_branch_with_git(info: &RepoInfo) -> Result<String, &str> {
     let arg = format!(
         "git remote show {} | sed -n '/HEAD branch/s/.* //p'",
         info.url,
     );
     match Command::new("bash").arg("-c").arg(arg).output() {
+        Ok(v) => {
+            let from_utf8 = String::from_utf8(v.stdout);
+            Ok(from_utf8.unwrap().trim().to_string())
+        }
+        Err(e) => panic!("Unable to get default branch of repository: {:?}", e),
+    }
+}
+
+fn get_default_branch_from_branch(branch_path: &Path) -> Result<String, &str> {
+    let arg = format!("get rev-parse --abbrev-ref HEAD",);
+    match Command::new("bash")
+        .current_dir(branch_path)
+        .arg("-c")
+        .arg(arg)
+        .output()
+    {
         Ok(v) => {
             let from_utf8 = String::from_utf8(v.stdout);
             Ok(from_utf8.unwrap().trim().to_string())
@@ -557,10 +608,13 @@ fn main() {
 
     let args = Args::parse();
 
+    // TODO: -d/--rm flag to delete a branch - will delete ALL branches with this label
+
     // TODO: Clean up the 'unwrap' everywhere
     // TODO: Handle single value, clone repo from default user
     match &args.input {
         s if s == "list" => println!("{}", list(&cfg)),
+        s if s == "delete" || s == "remove" => delete_branch(&cfg),
         s if double_value_regex().is_match(&s) => {
             println!("{}", get_workspace_or_branch(&cfg, s));
             return;
