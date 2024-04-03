@@ -7,7 +7,7 @@ license = "MIT"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-clap = { version = "4.5.3", features = ["derive"] }
+clap = { version = "4.5.3", features = ["cargo"] }
 reflink-copy = "0.1.15"
 regex = "1.10.3"
 reqwest = { version = "0.11.26", features = ["blocking", "json"] }

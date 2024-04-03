@@ -4,7 +4,7 @@ use std::{
     process::{exit, Command},
 };
 
-use clap::Parser;
+use clap::{arg, command, Command as clapCommand };
 use reflink_copy::reflink_or_copy;
 use regex::Regex;
 
@@ -13,15 +13,6 @@ use reqwest::{
     header::{HeaderMap, HeaderValue},
 };
 use walkdir::{DirEntry, WalkDir};
-
-#[derive(Parser, Debug)]
-#[command(version, about, long_about = None)]
-struct Args {
-    input: String,
-
-    #[arg(short, long)]
-    branch: Option<String>,
-}
 
 struct Config {
     root_dir: PathBuf,
@@ -109,6 +100,40 @@ impl RepoInfo {
             ),
             owner: captures.get(1).unwrap().as_str().to_string(),
             name: captures.get(2).unwrap().as_str().to_string(),
+        }
+    }
+
+    fn from_branch_path(path: &Path) -> Self {
+        let repo_path = path.parent().unwrap();
+        let owner_path = repo_path.parent().unwrap();
+        let domain_path = owner_path.parent().unwrap();
+
+        let repo = repo_path
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        let owner = owner_path
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        let domain = domain_path
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+
+        RepoInfo {
+            url: format!(
+                "git@{}:{}/{}.git",
+                domain.clone(),
+                owner.clone(),
+                repo.clone()
+            ),
+            domain,
+            owner,
+            name: repo,
         }
     }
 
@@ -286,6 +311,8 @@ fn get_workspace_or_branch(cfg: &Config, search: &str) -> String {
     let binding = repo_level_matches.into_iter().next().unwrap();
     let directory = binding.path().to_str().unwrap();
 
+    todo!("Attach the main branch here!");
+
     return directory.to_string();
 }
 
@@ -391,7 +418,12 @@ fn checkout_branch(cfg: &Config, info: &RepoInfo, branch: &str) -> String {
     return branch_path.to_str().unwrap().to_string();
 }
 
-fn delete_branch() {}
+fn delete_branch(cfg: &Config, branch: &str) {
+    todo!("Find all branches");
+    git_remove_worktree_branch(Path::new(
+        "/Users/samwillis/code/github.com/samjwillis97/aemo-cf/test-2",
+    ));
+}
 
 fn check_git_installed() {
     Command::new("git")
@@ -527,35 +559,32 @@ fn git_silent_add_file(repo_path: &Path, file: &Path) {
 
 fn git_remove_worktree_branch(branch_path: &Path) {
     let branch_name = branch_path.file_name().unwrap().to_str().unwrap();
-    let default_branch = get_default_branch_from_branch(branch_path).unwrap();
+    let default_branch =
+        get_default_branch_with_git(&RepoInfo::from_branch_path(branch_path)).unwrap();
     let repo_root = branch_path.parent().unwrap();
-    let default_branch_path = repo_root.join(default_branch);
+    let default_branch_path = repo_root.join(default_branch.clone());
 
-    println!("rm -rf {}", branch_path.to_str().unwrap());
-    println!("Working Dir: {:?}", default_branch_path);
-    println!("git worktree prune && git branch -D \"{}\"", branch_name);
+    match Command::new("bash")
+        .arg("-c")
+        .arg(format!("rm -rf {}", branch_path.to_str().unwrap()))
+        .output()
+    {
+        Ok(_) => (),
+        Err(e) => eprintln!("Unable to remove worktree branch directory: {}", e),
+    }
 
-    // match Command::new("bash")
-    //     .arg("-c")
-    //     .arg(format!("rm -rf {}", branch_path.to_str().unwrap()))
-    //     .output()
-    // {
-    //     Ok(_) => (),
-    //     Err(e) => eprintln!("Unable to remove worktree branch directory: {}", e),
-    // }
-
-    // match Command::new("bash")
-    //     .current_dir(default_branch_path)
-    //     .arg("-c")
-    //     .arg(format!(
-    //         "git worktree prune && git branch -D \"{}\"",
-    //         branch_name
-    //     ))
-    //     .output()
-    // {
-    //     Ok(_) => (),
-    //     Err(e) => eprintln!("Unable to clean worktree and delete branch: {}", e),
-    // }
+    match Command::new("bash")
+        .current_dir(default_branch_path)
+        .arg("-c")
+        .arg(format!(
+            "git worktree prune && git branch -D \"{}\"",
+            branch_name
+        ))
+        .output()
+    {
+        Ok(_) => (),
+        Err(e) => eprintln!("Unable to clean worktree and delete branch: {}", e),
+    }
 }
 
 fn get_default_branch_with_git(info: &RepoInfo) -> Result<String, &str> {
@@ -564,22 +593,6 @@ fn get_default_branch_with_git(info: &RepoInfo) -> Result<String, &str> {
         info.url,
     );
     match Command::new("bash").arg("-c").arg(arg).output() {
-        Ok(v) => {
-            let from_utf8 = String::from_utf8(v.stdout);
-            Ok(from_utf8.unwrap().trim().to_string())
-        }
-        Err(e) => panic!("Unable to get default branch of repository: {:?}", e),
-    }
-}
-
-fn get_default_branch_from_branch(branch_path: &Path) -> Result<String, &str> {
-    let arg = format!("get rev-parse --abbrev-ref HEAD",);
-    match Command::new("bash")
-        .current_dir(branch_path)
-        .arg("-c")
-        .arg(arg)
-        .output()
-    {
         Ok(v) => {
             let from_utf8 = String::from_utf8(v.stdout);
             Ok(from_utf8.unwrap().trim().to_string())
@@ -606,15 +619,28 @@ fn get_request_client() -> Client {
 fn main() {
     let cfg = Config::new();
 
-    let args = Args::parse();
+    let app = command!()
+        .subcommand_required(true)
+        .allow_external_subcommands(true)
+        .subcommand(
+            clapCommand::new("delete")
+                .arg(arg!(<BRANCH> "The branch to delete"))
+                .arg_required_else_help(true),
+        )
+        .subcommand(clapCommand::new("list").arg_required_else_help(false));
 
-    // TODO: -d/--rm flag to delete a branch - will delete ALL branches with this label
+    match app.get_matches().subcommand() {
+        Some(("list", _)) => handle_list_subcommand(&cfg),
+        Some(("delete", sub_matches)) => {
+            handle_delete_subcommand(&cfg, sub_matches.get_one::<String>("BRANCH").unwrap())
+        }
+        Some((ext, _)) => handle_other_subcommand(&cfg, ext),
+        None => unreachable!(),
+    };
+}
 
-    // TODO: Clean up the 'unwrap' everywhere
-    // TODO: Handle single value, clone repo from default user
-    match &args.input {
-        s if s == "list" => println!("{}", list(&cfg)),
-        s if s == "delete" || s == "remove" => delete_branch(&cfg),
+fn handle_other_subcommand(cfg: &Config, value: &str) {
+    match value {
         s if double_value_regex().is_match(&s) => {
             println!("{}", get_workspace_or_branch(&cfg, s));
             return;
@@ -627,7 +653,14 @@ fn main() {
             println!("{}", clone_repo(&cfg, &RepoInfo::from_git_url(s)));
             return;
         }
-        s if url_regex().is_match(&s) => todo!("URL value"),
         _ => todo!("Search"),
     }
+}
+
+fn handle_list_subcommand(cfg: &Config) {
+    println!("{}", list(&cfg));
+}
+
+fn handle_delete_subcommand(cfg: &Config, to_delete: &str) {
+    delete_branch(cfg, to_delete);
 }
