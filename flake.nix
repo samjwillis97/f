@@ -45,12 +45,12 @@
             # Add additional build inputs here
           ] ++ lib.optionals pkgs.stdenv.isDarwin [
             # Additional darwin specific inputs can be set here
-            pkgs.libiconv
             pkgs.darwin.apple_sdk.frameworks.SystemConfiguration
           ];
 
           # Additional environment variables can be set directly
-          OPENSSL_DIR = pkgs.openssl.dev;
+          OPENSSL_DIR = pkgs.openssl;
+          OPENSSL_DEV = pkgs.openssl.dev;
         };
 
         craneLibLLvmTools = craneLib.overrideToolchain
