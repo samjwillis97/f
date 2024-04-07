@@ -39,6 +39,7 @@
           strictDeps = true;
 
           buildInputs = [
+            pkgs.pkg-config
             pkgs.openssl
             # Add additional build inputs here
           ] ++ lib.optionals pkgs.stdenv.isDarwin [
