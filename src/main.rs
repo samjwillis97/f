@@ -4,7 +4,7 @@ use std::{
     process::{exit, Command},
 };
 
-use clap::{arg, command, Command as clapCommand };
+use clap::{arg, command, Command as clapCommand};
 use reflink_copy::reflink_or_copy;
 use regex::Regex;
 
@@ -227,7 +227,7 @@ fn get_workspace_with_branch(cfg: &Config, search: &str) -> String {
     return directory.to_string();
 }
 
-fn get_all_directories(cfg: &Config) -> Vec<String> {
+fn get_all_branch_directories(cfg: &Config) -> Vec<String> {
     WalkDir::new(&cfg.root_dir)
         .max_depth(4)
         .min_depth(4)
@@ -239,7 +239,7 @@ fn get_all_directories(cfg: &Config) -> Vec<String> {
 }
 
 fn list(cfg: &Config) -> String {
-    let dirs = get_all_directories(cfg);
+    let dirs = get_all_branch_directories(cfg);
     dirs.join(
         r#"
 "#,
@@ -275,7 +275,7 @@ fn get_workspace_or_branch(cfg: &Config, search: &str) -> String {
             return clone_repo(cfg, &RepoInfo::from_owner_name(cfg, search));
         }
 
-        let branch_level_matches = find_matching_branch_dirs(second_capture, &directories);
+        let branch_level_matches = find_matching_branch_dirs(second_capture, &repo_level_matches);
         if branch_level_matches.len() == 0 {
             let repo_path_vec = repo_level_matches
                 .first()
@@ -419,10 +419,21 @@ fn checkout_branch(cfg: &Config, info: &RepoInfo, branch: &str) -> String {
 }
 
 fn delete_branch(cfg: &Config, branch: &str) {
-    todo!("Find all branches");
-    git_remove_worktree_branch(Path::new(
-        "/Users/samwillis/code/github.com/samjwillis97/aemo-cf/test-2",
-    ));
+    let branch_dirs = get_all_branch_directories(cfg);
+
+    let branches_to_delete = branch_dirs
+        .into_iter()
+        .filter(|v| {
+            let path = PathBuf::from(v);
+            let current_branch = path.file_name().unwrap().to_str().unwrap();
+            return branch == current_branch;
+        })
+        .collect::<Vec<_>>();
+
+    for branch in branches_to_delete {
+        eprintln!("Deleting branch at: {}", branch);
+        git_remove_worktree_branch(&PathBuf::from(branch));
+    }
 }
 
 fn check_git_installed() {
