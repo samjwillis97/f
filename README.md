@@ -1,18 +1,28 @@
 # `f` - shell navigation of projects with git worktrees
 
-This is a clone of [h](https://github.com/zimbatm/h) with slight modifications to accomodate git worktrees and learn rust ☺️
-
+This is an interprestation of [h](https://github.com/zimbatm/h) with slight modifications to accomodate git worktrees and learn rust ☺️
 
 ## Usage
 
-`f <name>` - navigates to the repo and master/main branch
+### Main `f` commands
 
 `f <owner>/<repo>`
 
-`f <url>`
+`f <owner>/<repo>/<branch>`
+
+`f <git-url>`
+
+`f list`
+
+`f delete <branch>`
 
 
-### Flags
+### TMUX/FZF script
 
-`-b <branch_name>` - use in conjunction of other commands to specify a branch to checkout, create, and navigate to.
 
+## Development
+
+
+### Run using Nix
+
+`nix run .#f`

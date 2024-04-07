@@ -63,17 +63,17 @@
 
         # Build the actual crate itself, reusing the dependency
         # artifacts from above.
-        my-crate = craneLib.buildPackage (commonArgs // {
+        f = craneLib.buildPackage (commonArgs // {
           inherit cargoArtifacts;
         });
 
         f-fzf-tmux-wrapper = pkgs.writeShellScriptBin "f-fzf-tmux-wrapper"
         ''
-          selected="$(${my-crate}/bin/f list | ${pkgs.fzf}/bin/fzf -i --scheme=path --print-query)"
+          selected="$(${f}/bin/f list | ${pkgs.fzf}/bin/fzf -i --scheme=path --print-query)"
           retVal=$?
 
           if [ $retVal -eq 1 ]; then
-            selected=$(${my-crate}/bin/f "$selected" 2>/dev/null)
+            selected=$(${f}/bin/f "$selected" 2>/dev/null)
             retVal=$?
           else
             selected=$(echo "$selected" | sed -n 2p)
@@ -114,7 +114,7 @@
       {
         checks = {
           # Build the crate as part of `nix flake check` for convenience
-          inherit my-crate;
+          my-crate = f;
 
           # Run clippy (and deny all warnings) on the crate source,
           # again, resuing the dependency artifacts from above.
@@ -157,7 +157,7 @@
         };
 
         packages = {
-          default = my-crate;
+          default = f;
           f-tmux = f-fzf-tmux-wrapper;
         } // lib.optionalAttrs (!pkgs.stdenv.isDarwin) {
           my-crate-llvm-coverage = craneLibLLvmTools.cargoLlvmCov (commonArgs // {
@@ -166,7 +166,11 @@
         };
 
         apps.default = flake-utils.lib.mkApp {
-          drv = my-crate;
+          drv = f;
+        };
+
+        apps.f = flake-utils.lib.mkApp {
+          drv = f;
         };
 
         apps.f-tmux = flake-utils.lib.mkApp {
@@ -179,11 +183,11 @@
 
           # Additional dev-shell environment variables can be set directly
           # MY_CUSTOM_DEVELOPMENT_VAR = "something else";
-          inputsFrom = [ my-crate ];
+          inputsFrom = [ f ];
 
           # Extra inputs can be added here; cargo and rustc are provided by default.
           packages = [
-            my-crate
+            f
             f-fzf-tmux-wrapper
             # pkgs.ripgrep
           ];
