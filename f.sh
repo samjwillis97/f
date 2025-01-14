@@ -5,9 +5,13 @@
 dir=$HOME/code
 gitDomain=github.com
 
+# TODO: Overrides for these
 tmuxPath=$(which tmux)
+gitPath=$(which git)
 
 withPreview=true
+
+currentRepoRootPath=""
 
 usage() {
   echo "usage: $0 [-d <root directory>] [-g <git domain>] <repo>" 1>&2; 
@@ -53,40 +57,80 @@ find_matching_repo_dirs() {
   find "$dir" -mindepth 3 -maxdepth 3 -type d -name "$1" -path "*/$1"
 }
 
+# get_local_branch_directories
+get_local_branch_directories() {
+  local_dirs=($(find "$currentRepoRootPath" -type d -mindepth 1 -maxdepth 1))
+  mapped_branches=()
+
+  for item in "${local_dirs[@]}"; do
+    branch_name=$(basename "$item")
+    mapped_branches+=("$branch_name")
+  done
+
+  echo "${mapped_branches[@]}"
+}
+
+# get_remote_head_branch <.git directory>
+get_remote_head_branch() {
+  all_branches=($(git --no-pager --git-dir "$1" branch -r))
+  echo "${all_branches[2]}"
+}
+
+# get_remote_branches <.git directory>
+get_remote_branches() {
+  all_branches=($(git --no-pager --git-dir "$1" branch -r))
+}
+
+# checkout_branch <branch_name>
+checkout_branch() {
+  local_branches=($(get_local_branch_directories))
+  git_directory="$currentRepoRootPath/${local_branches[0]}/.git"
+  remote_branches=($(get_remote_branches "$git_directory"))
+  echo "${remote_branches[2]}"
+}
+
+# handle_repo_branch_pattern <repo> <branch>
+handle_repo_branch_pattern() {
+  repo_name=$1
+  branch_name=$2
+
+  matching_directories=$(find_matching_branch_dirs "$repo_name" "$branch_name")
+  matching_directories_count=$(find_matching_branch_dirs "$repo_name" "$branch_name" | wc -l)
+
+  if [ "$matching_directories_count" -eq 1 ]; then
+    session_name=$(get_last_number_of_slugs "$matching_directories" 3)
+    create_or_attach_to_tmux_session "$session_name" "$matching_directories"
+  elif [ "$matching_directories_count" -eq 0 ]; then
+    # need to check for the $working_directory/$repo_name existing
+    # if not - attempt to clone and checkout the branch
+    matching_directories=$(find_matching_repo_dirs "$repo_name")
+    matching_directories_count=$(find_matching_repo_dirs "$repo_name" | wc -l)
+
+    if [ "$matching_directories_count" -eq 1 ]; then
+      echo "Need to checkout"
+      currentRepoRootPath=$matching_directories
+      checkout_branch "$branch_name"
+      exit 0
+    elif [ "$matching_directories_count" -eq 0 ]; then
+      echo "Need to clone"
+      exit 0
+    fi
+
+    echo "matching_directories: $matching_directories"
+    echo "matching_directories_count: $matching_directories_count"
+    exit 0
+  fi
+
+  exit 1
+}
+
 # handle_creation <repo>
 handle_creation() {
   # check for <repo>/<branch> pattern
   if [[ $1 =~ ^[^/]+/[^/]+$ ]]; then
     repo_name=$(echo "$1" | cut -d'/' -f1)
     branch_name=$(echo "$1" | cut -d'/' -f2)
-
-    matching_directories=$(find_matching_branch_dirs "$repo_name" "$branch_name")
-    matching_directories_count=$(find_matching_branch_dirs "$repo_name" "$branch_name" | wc -l)
-
-    if [ "$matching_directories_count" -eq 1 ]; then
-      session_name=$(get_last_number_of_slugs "$matching_directories" 3)
-      create_or_attach_to_tmux_session "$session_name" "$matching_directories"
-    elif [ "$matching_directories_count" -eq 0 ]; then
-      # need to check for the $working_directory/$repo_name existing
-      # if not - attempt to clone and checkout the branch
-      echo "Need to square up"
-
-      matching_directories=$(find_matching_repo_dirs "$repo_name")
-      matching_directories_count=$(find_matching_repo_dirs "$repo_name" | wc -l)
-
-      if [ "$matching_directories_count" -eq 1 ]; then
-        echo "Need to checkout"
-        exit 0
-      elif [ "$matching_directories_count" -eq 0 ]; then
-        echo "Need to clone"
-        exit 0
-      fi
-
-      echo "matching_directories: $matching_directories"
-      echo "matching_directories_count: $matching_directories_count"
-      exit 0
-    fi
-    exit 1
+    handle_repo_branch_pattern "$repo_name" "$branch_name"
   fi
   # check for <owner>/<repo>/<branch> pattern
   # check for git(ea):.git url pattern
