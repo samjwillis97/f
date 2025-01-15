@@ -71,10 +71,15 @@ get_local_branch_directories() {
   echo "${mapped_branches[@]}"
 }
 
-# get_remote_head_branch <.git directory>
-get_remote_head_branch() {
+# get_remote_head_branch_from_local <.git directory>
+get_remote_head_branch_from_local() {
   all_branches=($(git --no-pager --git-dir "$1" branch -r))
   echo "${all_branches[2]}"
+}
+
+# get_remote_head_branch_from_remote <owner/repo>
+get_remote_head_branch_from_remote() {
+  git remote show "git@$gitDomain:$1.git" | sed -n '/HEAD branch/s/.* //p'
 }
 
 # get_remote_branches <.git directory>
@@ -95,7 +100,7 @@ checkout_branch() {
   local_branches=($(get_local_branch_directories))
   git_directory="$currentRepoRootPath/${local_branches[0]}/.git"
 
-  echo "fetching..."
+  echo "fetching repo..."
   git --git-dir "$git_directory" fetch
 
   branches=($(get_remote_branch_names "$git_directory"))
@@ -109,16 +114,23 @@ checkout_branch() {
 
   branch_directory="$currentRepoRootPath/$1"
   if [ $found -eq 0 ]; then
-    echo "Branch does not exist on remote"
+    echo "checking out new branch..."
     git worktree add -b "$1" "$branch_directory" "origin/main"
   else
-    echo "Branch exists on remote"
+    echo "checkout out existing branch..."
     git --git-dir "$git_directory" worktree add "$branch_directory" "origin/$1"
   fi
 
-  echo "Switching to branch"
+  echo "creating new tmux session..."
   session_name=$(get_last_number_of_slugs "$branch_directory" 3)
   create_or_attach_to_tmux_session "$session_name" "$branch_directory"
+}
+
+# clone_repo <repo>
+clone_repo() {
+  echo "going to clone repo..."
+  echo "fetching remote branch head..."
+  remote_head_branch=$(get_remote_head_branch_from_remote "$1")
 }
 
 # handle_repo_branch_pattern <repo> <branch>
@@ -139,17 +151,15 @@ handle_repo_branch_pattern() {
     matching_directories_count=$(find_matching_repo_dirs "$repo_name" | wc -l)
 
     if [ "$matching_directories_count" -eq 1 ]; then
-      echo "Need to checkout"
       currentRepoRootPath=$matching_directories
       checkout_branch "$branch_name"
-      exit 0
     elif [ "$matching_directories_count" -eq 0 ]; then
       echo "Need to clone"
+      currentRepoRootPath="$dir/$1/$2"
+      clone_repo "$1/$2"
       exit 0
     fi
 
-    echo "matching_directories: $matching_directories"
-    echo "matching_directories_count: $matching_directories_count"
     exit 0
   fi
 
