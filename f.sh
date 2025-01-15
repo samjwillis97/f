@@ -126,11 +126,20 @@ checkout_branch() {
   create_or_attach_to_tmux_session "$session_name" "$branch_directory"
 }
 
-# clone_repo <repo>
+# clone_repo <repo> -> <branch>
 clone_repo() {
-  echo "going to clone repo..."
-  echo "fetching remote branch head..."
+  currentRepoRootPath="$dir/$1"
+
+  echo "going to clone repo..." 1>&2;
+  mkdir -p "$currentRepoRootPath"
+
+  echo "fetching remote branch head..." 1>&2;
   remote_head_branch=$(get_remote_head_branch_from_remote "$1")
+
+  echo "cloning repo..."  1>&2;
+  git clone "git@$gitDomain:$1.git" "$currentRepoRootPath/$remote_head_branch" &> /dev/null
+
+  echo "$remote_head_branch"
 }
 
 # handle_repo_branch_pattern <repo> <branch>
@@ -154,15 +163,11 @@ handle_repo_branch_pattern() {
       currentRepoRootPath=$matching_directories
       checkout_branch "$branch_name"
     elif [ "$matching_directories_count" -eq 0 ]; then
-      echo "Need to clone"
-      currentRepoRootPath="$dir/$1/$2"
-      clone_repo "$1/$2"
-      exit 0
+      main_branch=$(clone_repo "$1/$2")
+      create_or_attach_to_tmux_session "$1/$2/$main_branch" "$dir/$1/$2/$main_branch"
     fi
-
-    exit 0
+    exit 1
   fi
-
   exit 1
 }
 
