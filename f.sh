@@ -40,6 +40,7 @@ create_or_attach_to_tmux_session() {
   fi
 
   tmux switch-client -t "$1"
+  exit 0;
 }
 
 # get_last_number_of_slugs <path> <number>
@@ -77,16 +78,47 @@ get_remote_head_branch() {
 }
 
 # get_remote_branches <.git directory>
-get_remote_branches() {
+get_remote_branch_names() {
   all_branches=($(git --no-pager --git-dir "$1" branch -r))
+
+  trimmed_branches=("${all_branches[@]:2}")
+
+  for i in "${!trimmed_branches[@]}"; do
+    trimmed_branches[$i]="${trimmed_branches[$i]#origin/}"
+  done
+
+  echo "${trimmed_branches[@]}"
 }
 
 # checkout_branch <branch_name>
 checkout_branch() {
   local_branches=($(get_local_branch_directories))
   git_directory="$currentRepoRootPath/${local_branches[0]}/.git"
-  remote_branches=($(get_remote_branches "$git_directory"))
-  echo "${remote_branches[2]}"
+
+  echo "fetching..."
+  git --git-dir "$git_directory" fetch
+
+  branches=($(get_remote_branch_names "$git_directory"))
+
+  found=0
+  for val in "${branches[@]}"; do
+    if [ "$val" == "$1" ]; then
+      found=1
+    fi
+  done
+
+  branch_directory="$currentRepoRootPath/$1"
+  if [ $found -eq 0 ]; then
+    echo "Branch does not exist on remote"
+    git worktree add -b "$1" "$branch_directory" "origin/main"
+  else
+    echo "Branch exists on remote"
+    git --git-dir "$git_directory" worktree add "$branch_directory" "origin/$1"
+  fi
+
+  echo "Switching to branch"
+  session_name=$(get_last_number_of_slugs "$branch_directory" 3)
+  create_or_attach_to_tmux_session "$session_name" "$branch_directory"
 }
 
 # handle_repo_branch_pattern <repo> <branch>
