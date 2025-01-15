@@ -14,7 +14,7 @@ withPreview=true
 currentRepoRootPath=""
 
 usage() {
-  echo "usage: $0 [-d <root directory>] [-g <git domain>] <repo>" 1>&2; 
+  echo "usage: $0 [-r <root directory>] [-g <git domain>] <repo>" 1>&2; 
   echo "  -h                  display this usage" 1>&2; 
   echo "  -l                  list all of the available workspaces via. fzf" 1>&2; 
   echo "  -d                  delete a particular workspace" 1>&2; 
@@ -50,12 +50,12 @@ get_last_number_of_slugs() {
 
 # find_matching_branch_dirs <repo> <branch>
 find_matching_branch_dirs() {
-  find "$dir" -mindepth 4 -maxdepth 4 -type d -name "$2" -path "*/$1/$2"
+  find "$dir" -mindepth 4 -maxdepth 4 -type d -name "$2" -path "$dir/$gitDomain/*/$1/$2"
 }
 
 # find_matching_repo_dirs <repo>
 find_matching_repo_dirs() {
-  find "$dir" -mindepth 3 -maxdepth 3 -type d -name "$1" -path "*/$1"
+  find "$dir" -mindepth 3 -maxdepth 3 -type d -name "$1" -path "$dir/$gitDomain/*/$1"
 }
 
 # get_local_branch_directories
@@ -96,11 +96,14 @@ get_remote_branch_names() {
 }
 
 # checkout_branch <branch_name>
+# TODO: copy any files that are not checked in, like .envrc
+# node_modules
+# and enabled direnv
 checkout_branch() {
   local_branches=($(get_local_branch_directories))
   git_directory="$currentRepoRootPath/${local_branches[0]}/.git"
 
-  echo "fetching repo..."
+  echo "fetching repo..." 1>&2;
   git --git-dir "$git_directory" fetch
 
   branches=($(get_remote_branch_names "$git_directory"))
@@ -114,21 +117,21 @@ checkout_branch() {
 
   branch_directory="$currentRepoRootPath/$1"
   if [ $found -eq 0 ]; then
-    echo "checking out new branch..."
-    git worktree add -b "$1" "$branch_directory" "origin/main"
+    echo "checking out new branch..." 1>&2;
+    git --git-dir "$git_directory" worktree add -b "$1" "$branch_directory" "origin/main"
   else
-    echo "checkout out existing branch..."
+    echo "checkout out existing branch..." 1>&2;
     git --git-dir "$git_directory" worktree add "$branch_directory" "origin/$1"
   fi
 
-  echo "creating new tmux session..."
+  echo "creating new tmux session..." 1>&2;
   session_name=$(get_last_number_of_slugs "$branch_directory" 3)
   create_or_attach_to_tmux_session "$session_name" "$branch_directory"
 }
 
 # clone_repo <repo> -> <branch>
 clone_repo() {
-  currentRepoRootPath="$dir/$1"
+  currentRepoRootPath="$dir/$gitDomain/$1"
 
   echo "going to clone repo..." 1>&2;
   mkdir -p "$currentRepoRootPath"
@@ -164,12 +167,39 @@ handle_repo_branch_pattern() {
       checkout_branch "$branch_name"
     elif [ "$matching_directories_count" -eq 0 ]; then
       main_branch=$(clone_repo "$1/$2")
-      create_or_attach_to_tmux_session "$1/$2/$main_branch" "$dir/$1/$2/$main_branch"
+      create_or_attach_to_tmux_session "$1/$2/$main_branch" "$dir/$gitDomain/$1/$2/$main_branch"
     fi
     exit 1
   fi
   exit 1
 }
+
+# handle_owner_repo_branch_pattern <owner> <repo> <branch>
+handle_owner_repo_branch_pattern() {
+  owner_name=$1
+  repo_name=$2
+  branch_name=$3
+
+  tmux_session_name="$owner_name/$repo_name/$branch_name"
+  branch_directory="$dir/$gitDomain/$owner_name/$repo_name/$branch_name"
+
+  if [ -d "$branch_directory" ]; then
+    create_or_attach_to_tmux_session "$tmux_session_name" "$branch_directory"
+  fi
+
+  matching_directories=$(find "$dir" -mindepth 3 -maxdepth 3 -type d -name "$repo_name" -path "$dir/$gitDomain/$owner_name/$repo_name")
+  matching_directories_count=$(find "$dir" -mindepth 3 -maxdepth 3 -type d -name "$repo_name" -path "$dir/$gitDomain/$owner_name/$repo_name" | wc -l)
+  if [ "$matching_directories_count" -eq 1 ]; then
+    currentRepoRootPath=$matching_directories
+    checkout_branch "$branch_name"
+  elif [ "$matching_directories_count" -eq 0 ]; then
+    clone_repo "$owner_name/$repo_name" 1>/dev/null
+    currentRepoRootPath="$dir/$gitDomain/$owner_name/$repo_name"
+    checkout_branch "$branch_name"
+  fi
+  exit 1
+}
+
 
 # handle_creation <repo>
 handle_creation() {
@@ -179,8 +209,14 @@ handle_creation() {
     branch_name=$(echo "$1" | cut -d'/' -f2)
     handle_repo_branch_pattern "$repo_name" "$branch_name"
   fi
+
   # check for <owner>/<repo>/<branch> pattern
-  # check for git(ea):.git url pattern
+  if [[ $1 =~ ^[^/]+/[^/]+/[^/]+$ ]]; then
+    owner_name=$(echo "$1" | cut -d'/' -f1)
+    repo_name=$(echo "$1" | cut -d'/' -f2)
+    branch_name=$(echo "$1" | cut -d'/' -f3)
+    handle_owner_repo_branch_pattern "$owner_name" "$repo_name" "$branch_name"
+  fi
 }
 
 handle_list() {
@@ -210,11 +246,10 @@ handle_list() {
   create_or_attach_to_tmux_session "$selected_name" "$selected"
 }
 
-# TODO: Handle piping from stdin
-while getopts ":h:d:g:l" o; do
+while getopts ":h:r:g:l" o; do
     case "${o}" in
         h) usage ;;
-        d) dir=${OPTARG} ;;
+        r) dir=${OPTARG} ;;
         g) gitDomain=${OPTARG} ;;
         l) handle_list ;;
         *) usage ;;
