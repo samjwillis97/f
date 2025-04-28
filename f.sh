@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 
 # root dir will be $HOME/code
 # default git domain will be github.com
@@ -25,7 +25,7 @@ usage() {
 create_or_attach_to_tmux_session() {
   tmux_running=$(pgrep "$tmuxPath")
 
-  if [[ -z $TMUX ]] && [[ -z $tmux_running ]]; then
+  if [ -z "$TMUX" ] && [ -z "$tmux_running" ]; then
       tmux new-session -s "$1" -c "$2"
       exit 0
   fi
@@ -34,7 +34,7 @@ create_or_attach_to_tmux_session() {
       tmux new-session -ds "$1" -c "$2"
   fi
 
-  if [[ -z $TMUX ]]; then
+  if [ -z "$TMUX" ]; then
       tmux attach-session -t "$1"
       exit 0
   fi
@@ -142,10 +142,10 @@ checkout_branch() {
   branch_directory="$currentRepoRootPath/$1"
   if [ $found -eq 0 ]; then
     echo "checking out new branch..." 1>&2;
-    git --git-dir "$git_directory" worktree add -b "$1" "$branch_directory" "origin/$remote_head"
+    git --git-dir "$git_directory" worktree add -b "$1" "$branch_directory" "$remote_head"
   else
     echo "checkout out existing branch..." 1>&2;
-    git --git-dir "$git_directory" worktree add "$branch_directory" "origin/$1"
+    git --git-dir "$git_directory" worktree add "$branch_directory" "$1"
   fi
 
   echo "copying untracked files..." 1>&2;
