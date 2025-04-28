@@ -95,13 +95,37 @@ get_remote_branch_names() {
   echo "${trimmed_branches[@]}"
 }
 
+# copy_direnv <dir>
+enable_direnv() {
+  if [ -f "$1/.envrc" ]; then
+    direnv allow "$1/.envrc"
+  fi
+}
+
+# copy_node_modules <from_dir> <to_dir>
+copy_node_modules() {
+  if [ -d "$1/node_modules" ]; then
+    echo "copying node_modules..." 1>&2;
+    cp -r --reflink=auto "$1/node_modules" "$2"
+  fi
+}
+
+# copy_untracked_files <from_dir> <to_dir>
+copy_untracked_files() {
+  count=$(git --git-dir "$1/.git" --work-tree "$1" ls-files --others | grep -v '^node_modules/' | wc -l)
+  echo "$count files to copy..." 1>&2;
+  pushd "$1" || exit 1;
+  git --git-dir "$1/.git" --work-tree "$1" ls-files --others | grep -v '^node_modules/' | xargs -P "$(nproc)" -I{} cp --reflink=auto "{}" "$2" &> /dev/null
+  popd || exit 1;
+  echo "git --git-dir "$1/.git" --work-tree "$1" ls-files --others | grep -v '^node_modules/' | xargs -P "$(nproc)" -I{} cp --reflink=auto --parents "$1/{}" "$2" &> /dev/null"
+}
+
 # checkout_branch <branch_name>
-# TODO: copy any files that are not checked in, like .envrc
-# node_modules
-# and enabled direnv
 checkout_branch() {
-  local_branches=($(get_local_branch_directories))
-  git_directory="$currentRepoRootPath/${local_branches[0]}/.git"
+  last_two_slugs=$(get_last_number_of_slugs "$currentRepoRootPath" 2)
+  remote_head="$(get_remote_head_branch_from_remote "$last_two_slugs")"
+
+  git_directory="$currentRepoRootPath/${remote_head}/.git"
 
   echo "fetching repo..." 1>&2;
   git --git-dir "$git_directory" fetch
@@ -118,11 +142,18 @@ checkout_branch() {
   branch_directory="$currentRepoRootPath/$1"
   if [ $found -eq 0 ]; then
     echo "checking out new branch..." 1>&2;
-    git --git-dir "$git_directory" worktree add -b "$1" "$branch_directory" "origin/main"
+    git --git-dir "$git_directory" worktree add -b "$1" "$branch_directory" "origin/$remote_head"
   else
     echo "checkout out existing branch..." 1>&2;
     git --git-dir "$git_directory" worktree add "$branch_directory" "origin/$1"
   fi
+
+  echo "copying untracked files..." 1>&2;
+  copy_node_modules "$currentRepoRootPath/${remote_head}" "$branch_directory"
+  copy_untracked_files "$currentRepoRootPath/${remote_head}" "$branch_directory"
+
+  echo "enabling direnv..." 1>&2;
+  enable_direnv "$branch_directory"
 
   echo "creating new tmux session..." 1>&2;
   session_name=$(get_last_number_of_slugs "$branch_directory" 3)
@@ -255,6 +286,7 @@ while getopts ":h:r:g:l" o; do
         *) usage ;;
     esac
 done
+
 shift $((OPTIND-1))
 
 if [ ! -t 0 ]; then
@@ -262,4 +294,11 @@ if [ ! -t 0 ]; then
   handle_creation "$input"
   exit 1
 fi
+
+# Need to get the last argument
+if [ $# -eq 0 ]; then
+  usage
+fi
+
+handle_creation "${@: -1}"
 
