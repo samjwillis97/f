@@ -252,7 +252,7 @@ handle_creation() {
 
 handle_list() {
   if $withPreview; then
-    selected="$(find "$dir" -mindepth 4 -maxdepth 4 -type d | fzf -i --scheme=path --print-query --preview="git --git-dir={}/.git lg3")"
+    selected="$(find "$dir" -mindepth 4 -maxdepth 4 -type d | fzf -i --scheme=path --print-query --preview="git --git-dir={}/.git --no-pager -c color.ui=always show --summary --format=fuller")"
   else
     selected="$(find "$dir" -mindepth 4 -maxdepth 4 -type d | fzf -i --scheme=path --print-query)"
   fi
