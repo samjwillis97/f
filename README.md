@@ -1,6 +1,6 @@
 # `f` - shell navigation of projects with git worktrees
 
-This is an interprestation of [h](https://github.com/zimbatm/h) with slight modifications to accomodate git worktrees and learn rust ☺️
+This is an interprestation of [h](https://github.com/zimbatm/h) with slight modifications to accomodate git worktrees and suit my workflow better
 
 ## Usage
 
@@ -17,12 +17,6 @@ This is an interprestation of [h](https://github.com/zimbatm/h) with slight modi
 `f delete <branch>`
 
 
-### TMUX/FZF script
-
-
-## Development
-
-
 ### Run using Nix
 
-`nix run .#f`
+`nix run .#`
