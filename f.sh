@@ -21,6 +21,24 @@ usage() {
   exit 1;
 }
 
+get_system() {
+  unameOut="$(uname -s)"
+  case "${unameOut}" in
+      Linux*)     machine=Linux;;
+      Darwin*)    machine=Mac;;
+      *)          exit 1;;
+  esac
+  echo ${machine}
+}
+
+get_thread_count() {
+  if [ "$(get_system)" = "Mac" ]; then
+    sysctl -n hw.physicalcpu
+  else
+    nproc
+  fi
+}
+
 # create_or_attach_to_tmux_session <session_name> <working_directory>
 create_or_attach_to_tmux_session() {
   tmux_running=$(pgrep "$tmuxPath")
@@ -73,19 +91,20 @@ get_local_branch_directories() {
 
 # get_remote_head_branch_from_local <.git directory>
 get_remote_head_branch_from_local() {
+  # FIXME: I think we are passing the wrong directory here
   all_branches=($(git --no-pager --git-dir "$1" branch -r))
   echo "${all_branches[2]}"
 }
 
 # get_remote_head_branch_from_remote <owner/repo>
 get_remote_head_branch_from_remote() {
-  git remote show "git@$gitDomain:$1.git" | sed -n '/HEAD branch/s/.* //p'
+  echo "fetching remote head branch for git@$gitDomain:$1.git" 1>&2;
+  git ls-remote --symref "git@$gitDomain:$1.git" HEAD | grep '^ref:' | sed 's/^ref: refs\/heads\///' | sed 's/\s*HEAD$//' | xargs
 }
 
 # get_remote_branches <.git directory>
 get_remote_branch_names() {
   all_branches=($(git --no-pager --git-dir "$1" branch -r))
-
   trimmed_branches=("${all_branches[@]:2}")
 
   for i in "${!trimmed_branches[@]}"; do
@@ -106,18 +125,25 @@ enable_direnv() {
 copy_node_modules() {
   if [ -d "$1/node_modules" ]; then
     echo "copying node_modules..." 1>&2;
-    cp -r --reflink=auto "$1/node_modules" "$2"
+    if [ "$(get_system)" = "Mac" ]; then
+      cp -r "$1/node_modules" "$2"
+    else
+      cp -r --reflink=auto "$1/node_modules" "$2"
+    fi
   fi
 }
 
 # copy_untracked_files <from_dir> <to_dir>
 copy_untracked_files() {
-  count=$(git --git-dir "$1/.git" --work-tree "$1" ls-files --others | grep -v '^node_modules/' | wc -l)
+  count=$(git --git-dir "$1/.git" --work-tree "$1" ls-files --others | grep -v '^node_modules/' | wc -l | xargs)
   echo "$count files to copy..." 1>&2;
   pushd "$1" || exit 1;
-  git --git-dir "$1/.git" --work-tree "$1" ls-files --others | grep -v '^node_modules/' | xargs -P "$(nproc)" -I{} cp --reflink=auto "{}" "$2" &> /dev/null
+  if [ "$(get_system)" = "Mac" ]; then
+    git --git-dir "$1/.git" --work-tree "$1" ls-files --others | grep -v '^node_modules/' | xargs -P "$(get_thread_count)" -I{} cp "{}" "$2" &> /dev/null
+  else
+    git --git-dir "$1/.git" --work-tree "$1" ls-files --others | grep -v '^node_modules/' | xargs -P "$(get_thread_count)" -I{} cp --reflink=auto "{}" "$2" &> /dev/null
+  fi
   popd || exit 1;
-  echo "git --git-dir "$1/.git" --work-tree "$1" ls-files --others | grep -v '^node_modules/' | xargs -P "$(nproc)" -I{} cp --reflink=auto --parents "$1/{}" "$2" &> /dev/null"
 }
 
 # checkout_branch <branch_name>
@@ -125,9 +151,14 @@ checkout_branch() {
   last_two_slugs=$(get_last_number_of_slugs "$currentRepoRootPath" 2)
   remote_head="$(get_remote_head_branch_from_remote "$last_two_slugs")"
 
-  git_directory="$currentRepoRootPath/${remote_head}/.git"
+  if [ -z "$remote_head" ]; then
+    echo "No remote head branch found for $last_two_slugs" 1>&2;
+    exit 1
+  fi
 
-  echo "fetching repo..." 1>&2;
+  git_directory="$currentRepoRootPath/$remote_head/.git"
+
+  echo "fetching repo $git_directory..." 1>&2;
   git --git-dir "$git_directory" fetch
 
   branches=($(get_remote_branch_names "$git_directory"))
