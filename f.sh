@@ -126,7 +126,7 @@ copy_node_modules() {
   if [ -d "$1/node_modules" ]; then
     echo "copying node_modules..." 1>&2;
     if [ "$(get_system)" = "Mac" ]; then
-      cp -r "$1/node_modules" "$2"
+      cp -r -c "$1/node_modules" "$2"
     else
       cp -r --reflink=auto "$1/node_modules" "$2"
     fi
@@ -138,11 +138,28 @@ copy_untracked_files() {
   count=$(git --git-dir "$1/.git" --work-tree "$1" ls-files --others | grep -v '^node_modules/' | wc -l | xargs)
   echo "$count files to copy..." 1>&2;
   pushd "$1" || exit 1;
-  if [ "$(get_system)" = "Mac" ]; then
-    git --git-dir "$1/.git" --work-tree "$1" ls-files --others | grep -v '^node_modules/' | xargs -P "$(get_thread_count)" -I{} cp "{}" "$2" &> /dev/null
-  else
-    git --git-dir "$1/.git" --work-tree "$1" ls-files --others | grep -v '^node_modules/' | xargs -P "$(get_thread_count)" -I{} cp --reflink=auto "{}" "$2" &> /dev/null
-  fi
+
+  copy_with_structure() {
+    local file="$1"
+    local dest_base="$2"
+    
+    # Create directory structure in destination
+    dest_dir="$dest_base/$(dirname "$file")"
+    mkdir -p "$dest_dir"
+    
+    # Copy the file preserving path
+    if [ "$(get_system)" = "Mac" ]; then
+      cp -P -c "$file" "$dest_base/$file"
+    else
+      cp -P --reflink=auto "$file" "$dest_base/$file"
+    fi
+  }
+
+  # Export the function so xargs can use it
+  export -f copy_with_structure
+  export -f get_system
+
+  git --git-dir "$1/.git" --work-tree "$1" ls-files --others | grep -v '^node_modules/' | xargs -P "$(get_thread_count)" -I{} sh -c 'copy_with_structure "$1" "$2"' _ {} "$2"
   popd || exit 1;
 }
 
