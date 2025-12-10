@@ -10,14 +10,16 @@ tmuxPath=$(which tmux)
 gitPath=$(which git)
 
 withPreview=true
+printPathOnly=false
 
 currentRepoRootPath=""
 
 usage() {
-  echo "usage: $0 [-r <root directory>] [-g <git domain>] <repo>" 1>&2; 
+  echo "usage: $0 [-r <root directory>] [-g <git domain>] [-p] <repo>" 1>&2; 
   echo "  -h                  display this usage" 1>&2; 
   echo "  -l                  list all of the available workspaces via. fzf" 1>&2; 
   echo "  -d                  delete a particular workspace" 1>&2; 
+  echo "  -p                  print path only (don't create/attach tmux session)" 1>&2; 
   exit 1;
 }
 
@@ -41,6 +43,11 @@ get_thread_count() {
 
 # create_or_attach_to_tmux_session <session_name> <working_directory>
 create_or_attach_to_tmux_session() {
+  if $printPathOnly; then
+    echo "$2"
+    exit 0
+  fi
+
   tmux_running=$(pgrep "$tmuxPath")
 
   if [ -z "$TMUX" ] && [ -z "$tmux_running" ]; then
@@ -126,7 +133,7 @@ copy_node_modules() {
   if [ -d "$1/node_modules" ]; then
     echo "copying node_modules..." 1>&2;
     if [ "$(get_system)" = "Mac" ]; then
-      cp -r -c "$1/node_modules" "$2"
+      cp -R -c "$1/node_modules" "$2"
     else
       cp -r --reflink=auto "$1/node_modules" "$2"
     fi
@@ -230,7 +237,7 @@ handle_repo_branch_pattern() {
   branch_name=$2
 
   matching_directories=$(find_matching_branch_dirs "$repo_name" "$branch_name")
-  matching_directories_count=$(find_matching_branch_dirs "$repo_name" "$branch_name" | wc -l)
+  matching_directories_count=$(echo "$matching_directories" | grep -c '^' | tr -d ' ')
 
   if [ "$matching_directories_count" -eq 1 ]; then
     session_name=$(get_last_number_of_slugs "$matching_directories" 3)
@@ -239,16 +246,15 @@ handle_repo_branch_pattern() {
     # need to check for the $working_directory/$repo_name existing
     # if not - attempt to clone and checkout the branch
     matching_directories=$(find_matching_repo_dirs "$repo_name")
-    matching_directories_count=$(find_matching_repo_dirs "$repo_name" | wc -l)
+    matching_directories_count=$(echo "$matching_directories" | grep -c '^' | tr -d ' ')
 
     if [ "$matching_directories_count" -eq 1 ]; then
       currentRepoRootPath=$matching_directories
       checkout_branch "$branch_name"
     elif [ "$matching_directories_count" -eq 0 ]; then
-      main_branch=$(clone_repo "$1/$2")
-      create_or_attach_to_tmux_session "$1/$2/$main_branch" "$dir/$gitDomain/$1/$2/$main_branch"
+      echo "Repository pattern $repo_name/$branch_name is ambiguous - please use owner/repo/branch format" 1>&2;
+      exit 1
     fi
-    exit 1
   fi
   exit 1
 }
@@ -325,12 +331,13 @@ handle_list() {
   create_or_attach_to_tmux_session "$selected_name" "$selected"
 }
 
-while getopts ":h:r:g:l" o; do
+while getopts ":h:r:g:lp" o; do
     case "${o}" in
         h) usage ;;
         r) dir=${OPTARG} ;;
         g) gitDomain=${OPTARG} ;;
         l) handle_list ;;
+        p) printPathOnly=true ;;
         *) usage ;;
     esac
 done
