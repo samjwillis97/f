@@ -9,6 +9,7 @@ gitDomain=github.com
 tmuxPath=$(which tmux)
 gitPath=$(which git)
 
+withFzf=true
 withPreview=true
 printPathOnly=false
 
@@ -18,6 +19,7 @@ usage() {
   echo "usage: $0 [-r <root directory>] [-g <git domain>] [-p] <owner>/<repo>/<branch>" 1>&2; 
   echo "  -h                  display this usage" 1>&2; 
   echo "  -l                  list all of the available workspaces via. fzf" 1>&2; 
+  echo "  -L                  list all of the available workspaces without fzf" 1>&2; 
   echo "  -d                  delete a particular workspace" 1>&2; 
   echo "  -p                  print path only (don't create/attach tmux session)" 1>&2; 
   exit 1;
@@ -311,38 +313,43 @@ handle_creation() {
 }
 
 handle_list() {
-  if $withPreview; then
-    selected="$(find "$dir" -mindepth 4 -maxdepth 4 -type d | fzf -i --scheme=path --print-query --preview="git --git-dir={}/.git --no-pager -c color.ui=always show --summary --format=fuller")"
-  else
-    selected="$(find "$dir" -mindepth 4 -maxdepth 4 -type d | fzf -i --scheme=path --print-query)"
+  if $withFzf; then
+    if $withPreview; then
+      selected="$(find "$dir" -mindepth 4 -maxdepth 4 -type d | fzf -i --scheme=path --print-query --preview="git --git-dir={}/.git --no-pager -c color.ui=always show --summary --format=fuller")"
+    else
+      selected="$(find "$dir" -mindepth 4 -maxdepth 4 -type d | fzf -i --scheme=path --print-query)"
+    fi
+    returnVal=$?
+
+    if [ $returnVal -eq 0 ]; then
+      selected=$(echo "$selected" | sed -n 2p)
+    else
+      handle_creation "$selected"
+      echo "No match found"
+      exit 1
+    fi
+
+    repo_dir=$(dirname "$selected")
+    owner_dir=$(dirname "$repo_dir")
+    branch_name=$(basename "$selected")
+    repo_name=$(basename "$repo_dir")
+    owner_name=$(basename "$owner_dir")
+
+    selected_name="$owner_name/$repo_name/$branch_name"
+
+    create_or_attach_to_tmux_session "$selected_name" "$selected"
   fi
-  returnVal=$?
-
-  if [ $returnVal -eq 0 ]; then
-    selected=$(echo "$selected" | sed -n 2p)
-  else
-    handle_creation "$selected"
-    echo "No match found"
-    exit 1
-  fi
-
-  repo_dir=$(dirname "$selected")
-  owner_dir=$(dirname "$repo_dir")
-  branch_name=$(basename "$selected")
-  repo_name=$(basename "$repo_dir")
-  owner_name=$(basename "$owner_dir")
-
-  selected_name="$owner_name/$repo_name/$branch_name"
-
-  create_or_attach_to_tmux_session "$selected_name" "$selected"
+    find "$dir" -mindepth 4 -maxdepth 4 -type d 
+    exit 0
 }
 
-while getopts ":h:r:g:l:p" o; do
+while getopts ":hr:g:lpL" o; do
     case "${o}" in
         h) usage ;;
         r) dir=${OPTARG} ;;
         g) gitDomain=${OPTARG} ;;
         l) handle_list ;;
+        L) withFzf=false; handle_list ;;
         p) printPathOnly=true ;;
         *) usage ;;
     esac
