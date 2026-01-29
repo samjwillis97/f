@@ -343,7 +343,67 @@ handle_list() {
     exit 0
 }
 
-while getopts ":hr:g:lpL" o; do
+handle_delete() {
+  if $withFzf; then
+    if $withPreview; then
+      selected="$(find "$dir" -mindepth 4 -maxdepth 4 -type d | fzf -i --scheme=path --preview="git --git-dir={}/.git --no-pager -c color.ui=always show --summary --format=fuller" --prompt="Select workspace to delete: ")"
+    else
+      selected="$(find "$dir" -mindepth 4 -maxdepth 4 -type d | fzf -i --scheme=path --prompt="Select workspace to delete: ")"
+    fi
+    returnVal=$?
+
+    if [ $returnVal -ne 0 ]; then
+      echo "No workspace selected for deletion" 1>&2;
+      exit 1
+    fi
+  else
+    echo "Error: -d flag requires fzf to be enabled" 1>&2;
+    exit 1
+  fi
+
+  # Get the directory structure
+  repo_dir=$(dirname "$selected")
+  owner_dir=$(dirname "$repo_dir")
+  branch_name=$(basename "$selected")
+  repo_name=$(basename "$repo_dir")
+  owner_name=$(basename "$owner_dir")
+
+  # Confirm deletion
+  echo "About to delete workspace: $owner_name/$repo_name/$branch_name" 1>&2;
+  echo "Path: $selected" 1>&2;
+  echo -n "Are you sure? (y/N): " 1>&2;
+  read -r confirmation
+
+  if [ "$confirmation" != "y" ] && [ "$confirmation" != "Y" ]; then
+    echo "Deletion cancelled" 1>&2;
+    exit 0
+  fi
+
+  # Check if this is a git worktree
+  if [ -f "$selected/.git" ]; then
+    echo "Removing git worktree..." 1>&2;
+    
+    # Find the main worktree to get the git directory
+    remote_head=$(get_remote_head_branch_from_remote "$owner_name/$repo_name")
+    main_git_dir="$repo_dir/$remote_head/.git"
+    
+    if [ -d "$main_git_dir" ]; then
+      git --git-dir "$main_git_dir" worktree remove "$selected" --force
+      echo "Git worktree removed" 1>&2;
+    else
+      echo "Warning: Could not find main git directory, removing directory only" 1>&2;
+      rm -rf "$selected"
+    fi
+  else
+    echo "Removing directory..." 1>&2;
+    rm -rf "$selected"
+  fi
+
+  echo "Workspace deleted: $owner_name/$repo_name/$branch_name" 1>&2;
+  exit 0
+}
+
+while getopts ":hr:g:lpLd" o; do
     case "${o}" in
         h) usage ;;
         r) dir=${OPTARG} ;;
@@ -351,6 +411,7 @@ while getopts ":hr:g:lpL" o; do
         l) handle_list ;;
         L) withFzf=false; handle_list ;;
         p) printPathOnly=true ;;
+        d) handle_delete ;;
         *) usage ;;
     esac
 done
