@@ -17,11 +17,19 @@ currentRepoRootPath=""
 
 usage() {
   echo "usage: $0 [-r <root directory>] [-g <git domain>] [-p] <owner>/<repo>/<branch>" 1>&2; 
+  echo "       $0 gc [days]" 1>&2; 
+  echo "       $0 clean <days>" 1>&2; 
+  echo "" 1>&2;
+  echo "flags:" 1>&2; 
   echo "  -h                  display this usage" 1>&2; 
   echo "  -l                  list all of the available workspaces via. fzf" 1>&2; 
   echo "  -L                  list all of the available workspaces without fzf" 1>&2; 
   echo "  -d                  delete a particular workspace" 1>&2; 
   echo "  -p                  print path only (don't create/attach tmux session)" 1>&2; 
+  echo "" 1>&2;
+  echo "subcommands:" 1>&2; 
+  echo "  gc [days]           list stale worktrees (default: 30 days)" 1>&2; 
+  echo "  clean <days>        remove worktrees not touched in <days> days" 1>&2; 
   exit 1;
 }
 
@@ -121,6 +129,63 @@ get_remote_branch_names() {
   done
 
   echo "${trimmed_branches[@]}"
+}
+
+# is_primary_worktree <worktree_dir>
+# Returns 0 (true) if the directory is the primary clone (has a real .git directory, not a .git file)
+is_primary_worktree() {
+  [ -d "$1/.git" ]
+}
+
+# get_worktree_last_modified_epoch <worktree_dir>
+# Returns the epoch timestamp of the most recently modified file in the worktree
+# Excludes .git and node_modules directories for performance
+# Uses GNU find -printf which works in the Nix environment on both macOS and Linux
+get_worktree_last_modified_epoch() {
+  find "$1" -not -path "$1/.git/*" -not -path "$1/.git" -not -path "$1/node_modules/*" -not -path "$1/node_modules" -type f -printf '%T@\n' 2>/dev/null | sort -rn | head -1 | cut -d. -f1
+}
+
+# get_worktree_age_days <worktree_dir>
+# Returns the number of days since the worktree was last modified
+get_worktree_age_days() {
+  last_modified=$(get_worktree_last_modified_epoch "$1")
+  if [ -z "$last_modified" ]; then
+    echo "unknown"
+    return
+  fi
+  now=$(date +%s)
+  diff_seconds=$((now - last_modified))
+  echo $((diff_seconds / 86400))
+}
+
+# format_age <days>
+# Returns a human-readable age string
+format_age() {
+  if [ "$1" = "unknown" ]; then
+    echo "unknown"
+    return
+  fi
+  if [ "$1" -ge 365 ]; then
+    years=$((${1} / 365))
+    if [ "$years" -eq 1 ]; then
+      echo "${years} year"
+    else
+      echo "${years} years"
+    fi
+  elif [ "$1" -ge 30 ]; then
+    months=$((${1} / 30))
+    if [ "$months" -eq 1 ]; then
+      echo "${months} month"
+    else
+      echo "${months} months"
+    fi
+  else
+    if [ "$1" -eq 1 ]; then
+      echo "${1} day"
+    else
+      echo "${1} days"
+    fi
+  fi
 }
 
 # copy_direnv <dir>
@@ -402,6 +467,192 @@ handle_delete() {
   echo "Workspace deleted: $owner_name/$repo_name/$branch_name" 1>&2;
   exit 0
 }
+
+# delete_worktree <worktree_path>
+# Removes a worktree directory, using git worktree remove if it's a git worktree
+# Resolves the main git directory locally (no network calls)
+delete_worktree() {
+  wt_path="$1"
+  repo_dir=$(dirname "$wt_path")
+
+  if [ -f "$wt_path/.git" ]; then
+    # This is a linked worktree - resolve the main .git dir from the gitdir pointer
+    # The .git file contains: gitdir: /path/to/main/.git/worktrees/<name>
+    gitdir_line=$(cat "$wt_path/.git" | head -1)
+    worktree_git_path="${gitdir_line#gitdir: }"
+    # Go up two levels: .git/worktrees/<name> -> .git
+    main_git_dir=$(dirname "$(dirname "$worktree_git_path")")
+
+    if [ -d "$main_git_dir" ]; then
+      git --git-dir "$main_git_dir" worktree remove "$wt_path" --force
+    else
+      echo "Warning: Could not resolve main git directory, removing directory only" 1>&2;
+      rm -rf "$wt_path"
+    fi
+  else
+    rm -rf "$wt_path"
+  fi
+}
+
+# handle_gc [threshold_days]
+# Lists worktrees that haven't been touched in at least threshold_days (default: 30)
+handle_gc() {
+  threshold=${1:-30}
+
+  # Validate threshold is a number
+  case "$threshold" in
+    ''|*[!0-9]*) echo "Error: threshold must be a positive integer" 1>&2; exit 1 ;;
+  esac
+
+  stale_count=0
+
+  echo "Scanning for worktrees not touched in ${threshold}+ days..." 1>&2;
+  echo "" 1>&2;
+
+  # Use temp files to avoid subshell variable issues with piped while-read
+  gc_tmpfile=$(mktemp)
+  find "$dir" -mindepth 4 -maxdepth 4 -type d > "$gc_tmpfile"
+
+  # Collect stale worktrees sorted by age (oldest first)
+  entries=""
+  while IFS= read -r worktree; do
+    if is_primary_worktree "$worktree"; then
+      continue
+    fi
+
+    age=$(get_worktree_age_days "$worktree")
+    if [ "$age" = "unknown" ]; then
+      continue
+    fi
+
+    if [ "$age" -ge "$threshold" ]; then
+      entries="${entries}${age} ${worktree}\n"
+      stale_count=$((stale_count + 1))
+    fi
+  done < "$gc_tmpfile"
+  rm -f "$gc_tmpfile"
+
+  if [ "$stale_count" -eq 0 ]; then
+    echo "No stale worktrees found (threshold: ${threshold} days)" 1>&2;
+    exit 0
+  fi
+
+  echo "Found ${stale_count} stale worktree(s):" 1>&2;
+  echo "" 1>&2;
+
+  # Sort by age descending (oldest first) and display
+  printf '%b' "$entries" | sort -rn | while IFS=' ' read -r age worktree; do
+    [ -z "$age" ] && continue
+    display_name=$(get_last_number_of_slugs "$worktree" 3)
+    human_age=$(format_age "$age")
+    printf "  %-40s %s ago\n" "$display_name" "$human_age" 1>&2;
+  done
+
+  echo "" 1>&2;
+  echo "Run 'f clean <days>' to remove worktrees older than <days> days" 1>&2;
+  exit 0
+}
+
+# handle_clean <days>
+# Removes all worktrees not touched in <days> days, with confirmation
+handle_clean() {
+  if [ -z "$1" ]; then
+    echo "Error: 'clean' requires a number of days" 1>&2;
+    echo "Usage: f clean <days>" 1>&2;
+    exit 1
+  fi
+
+  threshold=$1
+
+  # Validate threshold is a number
+  case "$threshold" in
+    ''|*[!0-9]*) echo "Error: '<days>' must be a positive integer" 1>&2; exit 1 ;;
+  esac
+
+  echo "Scanning for worktrees not touched in ${threshold}+ days..." 1>&2;
+  echo "" 1>&2;
+
+  # Use temp file to avoid subshell variable issues with piped while-read
+  clean_tmpfile=$(mktemp)
+  find "$dir" -mindepth 4 -maxdepth 4 -type d > "$clean_tmpfile"
+
+  # Collect candidates
+  candidates=""
+  candidate_count=0
+  while IFS= read -r worktree; do
+    if is_primary_worktree "$worktree"; then
+      continue
+    fi
+
+    age=$(get_worktree_age_days "$worktree")
+    if [ "$age" = "unknown" ]; then
+      continue
+    fi
+
+    if [ "$age" -ge "$threshold" ]; then
+      candidates="${candidates}${age} ${worktree}\n"
+      candidate_count=$((candidate_count + 1))
+    fi
+  done < "$clean_tmpfile"
+  rm -f "$clean_tmpfile"
+
+  if [ "$candidate_count" -eq 0 ]; then
+    echo "No worktrees found older than ${threshold} days" 1>&2;
+    exit 0
+  fi
+
+  echo "The following ${candidate_count} worktree(s) will be removed:" 1>&2;
+  echo "" 1>&2;
+
+  printf '%b' "$candidates" | sort -rn | while IFS=' ' read -r age worktree; do
+    [ -z "$age" ] && continue
+    display_name=$(get_last_number_of_slugs "$worktree" 3)
+    human_age=$(format_age "$age")
+    printf "  %-40s %s ago\n" "$display_name" "$human_age" 1>&2;
+  done
+
+  echo "" 1>&2;
+  printf "Are you sure you want to delete these worktrees? (y/N): " 1>&2;
+  read -r confirmation
+
+  if [ "$confirmation" != "y" ] && [ "$confirmation" != "Y" ]; then
+    echo "Clean cancelled" 1>&2;
+    exit 0
+  fi
+
+  echo "" 1>&2;
+
+  # Use a temp file to avoid subshell variable loss from pipeline
+  tmpfile=$(mktemp)
+  printf '%b' "$candidates" > "$tmpfile"
+  while IFS=' ' read -r age worktree; do
+    [ -z "$age" ] && continue
+    display_name=$(get_last_number_of_slugs "$worktree" 3)
+    echo "Removing ${display_name}..." 1>&2;
+    if delete_worktree "$worktree"; then
+      echo "  Removed" 1>&2;
+    else
+      echo "  Failed to remove" 1>&2;
+    fi
+  done < "$tmpfile"
+  rm -f "$tmpfile"
+
+  echo "" 1>&2;
+  echo "Clean complete: removed ${candidate_count} worktree(s)" 1>&2;
+  exit 0
+}
+
+# Handle subcommands before getopts
+case "${1:-}" in
+  gc)
+    shift
+    handle_gc "$@"
+    ;;
+  clean)
+    shift
+    handle_clean "$@"
+    ;;
+esac
 
 while getopts ":hr:g:lpLd" o; do
     case "${o}" in
