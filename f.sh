@@ -12,11 +12,12 @@ gitPath=$(which git)
 withFzf=true
 withPreview=true
 printPathOnly=false
+ensureWorkspace=false
 
 currentRepoRootPath=""
 
 usage() {
-  echo "usage: $0 [-r <root directory>] [-g <git domain>] [-p] <owner>/<repo>/<branch>" 1>&2; 
+  echo "usage: $0 [-r <root directory>] [-g <git domain>] [-p] [-e] <owner>/<repo>/<branch>" 1>&2; 
   echo "       $0 gc [days]" 1>&2; 
   echo "       $0 clean <days>" 1>&2; 
   echo "" 1>&2;
@@ -26,6 +27,7 @@ usage() {
   echo "  -L                  list all of the available workspaces without fzf" 1>&2; 
   echo "  -d                  delete a particular workspace" 1>&2; 
   echo "  -p                  print path only (don't create/attach tmux session)" 1>&2; 
+  echo "  -e                  ensure workspace exists, print path, and never start tmux" 1>&2; 
   echo "" 1>&2;
   echo "subcommands:" 1>&2; 
   echo "  gc [days]           list stale worktrees (default: 30 days)" 1>&2; 
@@ -654,7 +656,7 @@ case "${1:-}" in
     ;;
 esac
 
-while getopts ":hr:g:lpLd" o; do
+while getopts ":hr:g:lpLde" o; do
     case "${o}" in
         h) usage ;;
         r) dir=${OPTARG} ;;
@@ -662,6 +664,7 @@ while getopts ":hr:g:lpLd" o; do
         l) handle_list ;;
         L) withFzf=false; handle_list ;;
         p) printPathOnly=true ;;
+        e) ensureWorkspace=true; printPathOnly=true ;;
         d) handle_delete ;;
         *) usage ;;
     esac
@@ -681,4 +684,3 @@ if [ $# -eq 0 ]; then
 fi
 
 handle_creation "${@: -1}"
-
